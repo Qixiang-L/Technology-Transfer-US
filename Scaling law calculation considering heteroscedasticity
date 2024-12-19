@@ -1,0 +1,89 @@
+import pandas as pd
+from scipy import stats
+import numpy as np
+import statsmodels.api as sm
+import matplotlib.pyplot as plt
+from openpyxl import Workbook
+
+# Read Excel data
+df1 = pd.read_excel('data.xlsx', sheet_name='patent', header=0)
+df2 = pd.read_excel('data.xlsx', sheet_name='population', header=0)
+
+# Select columns for linear regression
+cols = df1.iloc[:500, :500].columns
+
+# Initialize result list and residual plot data
+results = []
+residuals_dict = {}
+
+# Perform linear regression and save results
+for col in cols:
+    # Check for NaN and Inf
+    mask = np.logical_or(np.isnan(df1[col]), np.isnan(df2[col]))
+    mask = np.logical_or(mask, np.isinf(df1[col]))
+    mask = np.logical_or(mask, np.isinf(df2[col]))
+    df1_clean = df1[col][~mask]
+    df2_clean = df2[col][~mask]
+
+    # Check if data is empty
+    if df1_clean.empty or df2_clean.empty:
+        print(f"{col} has empty data.")
+        continue
+
+    # Check if data is constant or has zero variance
+    if df2_clean.nunique() == 1 or df1_clean.nunique() == 1:
+        print(f"{col} has constant values or zero variance.")
+        continue
+
+    # Check if data contains NaN or Inf
+    if np.isnan(df1_clean).any() or np.isnan(df2_clean).any() or np.isinf(df1_clean).any() or np.isinf(df2_clean).any():
+        print(f"NaN or infinite values in {col}")
+        continue
+
+    # Perform linear regression with robust standard errors
+    X = sm.add_constant(df2_clean)  # Add constant term
+    model = sm.OLS(df1_clean, X)
+    results_model = model.fit(cov_type='HC3')  # Use robust standard errors
+
+    # Extract regression results
+    slope = results_model.params[df2_clean.name]  # Access slope using variable name
+    intercept = results_model.params['const']     # Access intercept using 'const'
+    adj_r_value = results_model.rsquared_adj      # Adjusted R-squared
+    p_value = results_model.pvalues[df2_clean.name]  # p-value of the slope
+    std_err = results_model.bse[df2_clean.name]     # Standard error of the slope
+
+    # Calculate confidence intervals
+    conf_interval = results_model.conf_int(alpha=0.05).loc[df2_clean.name]
+
+    # Calculate residuals and predicted values
+    predicted_vals = results_model.fittedvalues
+    residuals = results_model.resid
+    residuals_dict[col] = (predicted_vals, residuals)
+
+    # Save results
+    results.append([col, slope, intercept, adj_r_value, p_value, std_err, conf_interval[0], conf_interval[1]])
+
+# Write results to an Excel file
+wb = Workbook()
+ws = wb.active
+ws.title = 'Results'
+headers = ['Column Name', 'Slope', 'Intercept', 'Adjusted R-squared', 'p-value', 'Standard Error', 'Lower Bound', 'Upper Bound']
+ws.append(headers)
+for row in results:
+    ws.append(row)
+
+# Save Excel file
+wb.save('D:\\Desktop\\scaling_exponents_with_Robust_SE.xlsx')
+
+# Generate and save residual plots
+# for col, (predicted_vals, residuals) in residuals_dict.items():
+    # plt.figure(figsize=(8, 6))
+    # plt.scatter(predicted_vals, residuals)
+    # plt.axhline(y=0, color='r', linestyle='--')
+    # plt.title(f'Residual Plot for {col}')
+    # plt.xlabel('Predicted Values')
+    # plt.ylabel('Residuals')
+    # plt.savefig(f'D:\\Desktop\\Residual_Plot_{col}.png')
+    # plt.close()
+
+print("Analysis complete. Results saved to Excel and residual plots generated.")
